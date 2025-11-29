@@ -268,7 +268,7 @@ class CompilerVisualizer:
             try:
                 from src.parser import create_parser as _create_parser
             except Exception as e:
-                self._set_tab_text("Parsing", f"Could not import parser:\n{e}")
+                self._set_tab_text("Parsing", f"Could not import parser:\n{e}\n{traceback.format_exc()}")
                 return
 
         parser = None
@@ -290,7 +290,7 @@ class CompilerVisualizer:
                     if self.notebook.tab(i, "text") == "Parsing":
                         self.notebook.select(i)
                         break
-            except Exception:
+            except Exception as tree_err:
                 # Fallback: try to print AST textually using ASTPrinter
                 try:
                     try:
@@ -309,11 +309,11 @@ class CompilerVisualizer:
                     finally:
                         _sys.stdout = old
                     text = buf.getvalue()
-                    self._set_tab_text("Parsing", text or "(AST printed nothing)")
+                    self._set_tab_text("Parsing", text or f"(AST printed nothing)\nTree error: {tree_err}")
                 except Exception:
                     self._set_tab_text(
                         "Parsing",
-                        f"(AST repr)\n{repr(ast)}\n\n(Also: ASTPrinter failed to print)\n{traceback.format_exc()}",
+                        f"(AST repr)\n{repr(ast)}\n\n(Tree error: {tree_err})\n(ASTPrinter also failed)\n{traceback.format_exc()}",
                     )
         except Exception as e:
             self._set_tab_text(
@@ -338,7 +338,9 @@ class CompilerVisualizer:
 
         try:
             analyzer = _create_analyzer()
-            is_valid, errors = analyzer.analyze(self.ast)
+            # analyze() returns bool, errors are in analyzer.errors
+            is_valid = analyzer.analyze(self.ast)
+            errors = getattr(analyzer, 'errors', [])
             self.semantic_result = (is_valid, errors)
             lines = [f"Valid: {is_valid}"]
             if not errors:
