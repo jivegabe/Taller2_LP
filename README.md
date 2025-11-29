@@ -43,8 +43,14 @@ Taller2_LP/
 - G++ (para compilar el código generado)
 
 ## Uso
+Para usar la CLI
 ```bash
 python main.py tests/test1_euclides.fun
+```
+
+Para usar la GUI
+```bash
+python src/view/visualizer.py
 ```
 
 ## Autores
