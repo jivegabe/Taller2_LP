@@ -59,6 +59,11 @@ reserved = {
     'not': 'NOT',
     'mod': 'MOD',
     'div': 'DIV',
+    
+    # Modelo de Actores (básico)
+    'actor': 'ACTOR',
+    'spawn': 'SPAWN',
+    'send': 'SEND',
 }
 
 # ============================================================================

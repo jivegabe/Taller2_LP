@@ -2,10 +2,15 @@
 // Lenguaje funcional -> C++
 
 #include <algorithm>
+#include <any>
 #include <cmath>
 #include <functional>
 #include <iostream>
+#include <memory>
+#include <mutex>
+#include <queue>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace std;
@@ -148,14 +153,133 @@ T max_val(T a, T b) { return a > b ? a : b; }
 
 // ============= Fin Runtime =============
 
-// Funciones
-template<typename T0>
-T0 factorial(T0 n) {
-    return ((n <= 1) ? 1 : (n * factorial((n - 1))));
+// ============= Runtime de Actores (Básico) =============
+
+// Helper para imprimir any
+void print_any(const any& a) {
+    if (a.type() == typeid(int)) cout << any_cast<int>(a);
+    else if (a.type() == typeid(double)) cout << any_cast<double>(a);
+    else if (a.type() == typeid(string)) cout << any_cast<string>(a);
+    else if (a.type() == typeid(const char*)) cout << any_cast<const char*>(a);
+    else cout << "[any]";
 }
+
+void println(const any& x) { print_any(x); cout << endl; }
+
+// Actor simple con cola de mensajes
+class Actor {
+protected:
+    queue<any> mailbox;
+    mutex mtx;
+    bool running = true;
+    thread worker;
+    function<void(any)> handler;
+
+public:
+    virtual ~Actor() { stop(); }
+
+    void send(any msg) {
+        lock_guard<mutex> lock(mtx);
+        mailbox.push(msg);
+    }
+
+    bool empty() {
+        lock_guard<mutex> lock(mtx);
+        return mailbox.empty();
+    }
+
+    void start() {
+        worker = thread([this]() {
+            while (running) {
+                any msg;
+                {
+                    lock_guard<mutex> lock(mtx);
+                    if (!mailbox.empty()) {
+                        msg = mailbox.front();
+                        mailbox.pop();
+                    } else {
+                        this_thread::sleep_for(chrono::milliseconds(10));
+                        continue;
+                    }
+                }
+                if (handler) handler(msg);
+            }
+        });
+    }
+
+    void stop() {
+        running = false;
+        if (worker.joinable()) worker.join();
+    }
+
+    void set_handler(function<void(any)> h) { handler = h; }
+};
+
+// Sistema de actores simple
+class ActorSystem {
+    vector<shared_ptr<Actor>> actors;
+public:
+    template<typename T>
+    shared_ptr<T> spawn() {
+        auto actor = make_shared<T>();
+        actor->start();
+        actors.push_back(actor);
+        return actor;
+    }
+    
+    void wait_all() {
+        // Esperar a que todos los mailboxes estén vacíos
+        bool all_empty = false;
+        while (!all_empty) {
+            all_empty = true;
+            for (auto& a : actors) {
+                if (!a->empty()) {
+                    all_empty = false;
+                    break;
+                }
+            }
+            if (!all_empty) this_thread::sleep_for(chrono::milliseconds(10));
+        }
+        // Pequeña espera para el último mensaje en proceso
+        this_thread::sleep_for(chrono::milliseconds(50));
+    }
+};
+
+ActorSystem actorSystem;
+
+// ============= Fin Runtime de Actores =============
+
+// Funciones
+// Actor: printer
+class printerActor : public Actor {
+public:
+    printerActor() {
+        set_handler([this](any _msg) { this->handle(_msg); });
+    }
+
+    void handle(any _msg) {
+        auto msg = _msg;
+        println(msg);
+    }
+};
+
+// Actor: counter
+class counterActor : public Actor {
+public:
+    counterActor() {
+        set_handler([this](any _msg) { this->handle(_msg); });
+    }
+
+    void handle(any _msg) {
+        auto n = _msg;
+        println(n);
+    }
+};
 
 
 int main() {
-    [&]() { auto x = 5; println("Calculando factorial de 5:"); auto resultado = factorial(x); print("5! = "); println(resultado); return resultado; }();
+    [&]() { auto p = actorSystem.spawn<printerActor>(); auto c = actorSystem.spawn<counterActor>(); p->send("Hola desde actor!"); p->send("Otro mensaje"); c->send(42); println("Mensajes enviados"); return 0; }();
+    // Esperar a que los actores procesen todos los mensajes
+    actorSystem.wait_all();
     return 0;
 }

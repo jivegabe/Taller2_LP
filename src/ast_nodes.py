@@ -503,6 +503,44 @@ class TypeSignature(Declaration):
 
 
 # ============================================================================
+# MODELO DE ACTORES (Prototipo Básico)
+# ============================================================================
+
+@dataclass
+class ActorDecl(Declaration):
+    """Declaración de un actor: actor name param = body"""
+    name: str = ""
+    params: List[Pattern] = field(default_factory=list)
+    body: Expression = None
+
+
+@dataclass
+class SpawnExpr(Expression):
+    """Crear un actor: spawn ActorName"""
+    actor_name: str = ""
+
+
+@dataclass
+class SendExpr(Expression):
+    """Enviar mensaje: send actor mensaje"""
+    target: Expression = None
+    message: Expression = None
+
+
+@dataclass
+class ReceiveExpr(Expression):
+    """Recibir mensajes: receive pattern -> expr end"""
+    handlers: List['ReceiveHandler'] = field(default_factory=list)
+
+
+@dataclass
+class ReceiveHandler(ASTNode):
+    """Handler de mensaje en receive"""
+    pattern: Pattern = None
+    body: Expression = None
+
+
+# ============================================================================
 # VISITOR PARA RECORRER EL AST
 # ============================================================================
 

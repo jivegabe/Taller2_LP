@@ -265,7 +265,14 @@ def main():
             print(output)
     else:
         # Solo compilar
-        result = compiler.compile_file(args.input, args.output)
+        output_path = args.output
+        if output_path is None:
+            # Por defecto, guardar en output/
+            os.makedirs("output", exist_ok=True)
+            base_name = os.path.splitext(os.path.basename(args.input))[0]
+            output_path = os.path.join("output", base_name + ".cpp")
+        
+        result = compiler.compile_file(args.input, output_path)
         
         if result.success:
             print(f"Compilación exitosa: {result.output_file}")

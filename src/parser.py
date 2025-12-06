@@ -87,7 +87,8 @@ def p_declaration(p):
                    | var_decl
                    | const_decl
                    | type_decl
-                   | data_decl'''
+                   | data_decl
+                   | actor_decl'''
     p[0] = p[1]
 
 
@@ -344,6 +345,8 @@ def p_expression(p):
                   | while_expr
                   | for_expr
                   | do_block
+                  | spawn_expr
+                  | send_expr
                   | logical_or_expr'''
     p[0] = p[1]
 
@@ -730,6 +733,25 @@ def p_qualifier(p):
         p[0] = GeneratorQual(var=p[1], expr=p[3], lineno=p.lineno(1))
     else:
         p[0] = FilterQual(condition=p[1], lineno=p.lineno(1))
+
+
+# ============================================================================
+# MODELO DE ACTORES (Prototipo Básico)
+# ============================================================================
+
+def p_actor_decl(p):
+    '''actor_decl : ACTOR IDENTIFIER param_list ASSIGN expression'''
+    p[0] = ActorDecl(name=p[2], params=p[3], body=p[5], lineno=p.lineno(1))
+
+
+def p_spawn_expr(p):
+    '''spawn_expr : SPAWN IDENTIFIER'''
+    p[0] = SpawnExpr(actor_name=p[2], lineno=p.lineno(1))
+
+
+def p_send_expr(p):
+    '''send_expr : SEND postfix_expr postfix_expr'''
+    p[0] = SendExpr(target=p[2], message=p[3], lineno=p.lineno(1))
 
 
 # ============================================================================

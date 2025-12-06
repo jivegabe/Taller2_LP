@@ -25,6 +25,8 @@ class CppCodeGenerator(ASTVisitor):
         self.current_context = "global"  # "global", "function", "main"
         self.temp_counter = 0
         self.functions_declared: Set[str] = set()
+        self.actors_declared: Set[str] = set()
+        self.uses_actors = False
     
     def generate(self, ast: Program) -> str:
         """Genera código C++ desde el AST"""
@@ -49,6 +51,14 @@ class CppCodeGenerator(ASTVisitor):
         lines.append("// Lenguaje funcional -> C++")
         lines.append("")
         
+        # Añadir includes para actores si es necesario
+        if self.uses_actors:
+            self.includes.add("thread")
+            self.includes.add("queue")
+            self.includes.add("mutex")
+            self.includes.add("memory")
+            self.includes.add("any")
+        
         for inc in sorted(self.includes):
             lines.append(f"#include <{inc}>")
         lines.append("")
@@ -60,6 +70,11 @@ class CppCodeGenerator(ASTVisitor):
         # Tipos y utilidades
         lines.extend(self._generate_runtime())
         lines.append("")
+        
+        # Runtime de actores si se usan
+        if self.uses_actors:
+            lines.extend(self._generate_actor_runtime())
+            lines.append("")
         
         # Variables globales
         if self.global_vars:
@@ -87,6 +102,9 @@ class CppCodeGenerator(ASTVisitor):
                 lines.append("    " + line)
         else:
             lines.append("    // No hay código principal")
+        if self.uses_actors:
+            lines.append("    // Esperar a que los actores procesen todos los mensajes")
+            lines.append("    actorSystem.wait_all();")
         lines.append("    return 0;")
         lines.append("}")
         
@@ -234,6 +252,106 @@ class CppCodeGenerator(ASTVisitor):
             "// ============= Fin Runtime =============",
         ]
     
+    def _generate_actor_runtime(self) -> List[str]:
+        """Genera runtime básico para actores"""
+        return [
+            "// ============= Runtime de Actores (Básico) =============",
+            "",
+            "// Helper para imprimir any",
+            "void print_any(const any& a) {",
+            "    if (a.type() == typeid(int)) cout << any_cast<int>(a);",
+            "    else if (a.type() == typeid(double)) cout << any_cast<double>(a);",
+            "    else if (a.type() == typeid(string)) cout << any_cast<string>(a);",
+            "    else if (a.type() == typeid(const char*)) cout << any_cast<const char*>(a);",
+            "    else cout << \"[any]\";",
+            "}",
+            "",
+            "void println(const any& x) { print_any(x); cout << endl; }",
+            "",
+            "// Actor simple con cola de mensajes",
+            "class Actor {",
+            "protected:",
+            "    queue<any> mailbox;",
+            "    mutex mtx;",
+            "    bool running = true;",
+            "    thread worker;",
+            "    function<void(any)> handler;",
+            "",
+            "public:",
+            "    virtual ~Actor() { stop(); }",
+            "",
+            "    void send(any msg) {",
+            "        lock_guard<mutex> lock(mtx);",
+            "        mailbox.push(msg);",
+            "    }",
+            "",
+            "    bool empty() {",
+            "        lock_guard<mutex> lock(mtx);",
+            "        return mailbox.empty();",
+            "    }",
+            "",
+            "    void start() {",
+            "        worker = thread([this]() {",
+            "            while (running) {",
+            "                any msg;",
+            "                {",
+            "                    lock_guard<mutex> lock(mtx);",
+            "                    if (!mailbox.empty()) {",
+            "                        msg = mailbox.front();",
+            "                        mailbox.pop();",
+            "                    } else {",
+            "                        this_thread::sleep_for(chrono::milliseconds(10));",
+            "                        continue;",
+            "                    }",
+            "                }",
+            "                if (handler) handler(msg);",
+            "            }",
+            "        });",
+            "    }",
+            "",
+            "    void stop() {",
+            "        running = false;",
+            "        if (worker.joinable()) worker.join();",
+            "    }",
+            "",
+            "    void set_handler(function<void(any)> h) { handler = h; }",
+            "};",
+            "",
+            "// Sistema de actores simple",
+            "class ActorSystem {",
+            "    vector<shared_ptr<Actor>> actors;",
+            "public:",
+            "    template<typename T>",
+            "    shared_ptr<T> spawn() {",
+            "        auto actor = make_shared<T>();",
+            "        actor->start();",
+            "        actors.push_back(actor);",
+            "        return actor;",
+            "    }",
+            "    ",
+            "    void wait_all() {",
+            "        // Esperar a que todos los mailboxes estén vacíos",
+            "        bool all_empty = false;",
+            "        while (!all_empty) {",
+            "            all_empty = true;",
+            "            for (auto& a : actors) {",
+            "                if (!a->empty()) {",
+            "                    all_empty = false;",
+            "                    break;",
+            "                }",
+            "            }",
+            "            if (!all_empty) this_thread::sleep_for(chrono::milliseconds(10));",
+            "        }",
+            "        // Pequeña espera para el último mensaje en proceso",
+            "        this_thread::sleep_for(chrono::milliseconds(50));",
+            "    }",
+            "};",
+            "",
+            "ActorSystem actorSystem;",
+            "",
+            "// ============= Fin Runtime de Actores =============",
+        ]
+    
     def indent(self) -> str:
         """Retorna la indentación actual"""
         return "    " * self.indent_level
@@ -268,6 +386,9 @@ class CppCodeGenerator(ASTVisitor):
                 self.visit(decl)
             elif isinstance(decl, FunctionDecl):
                 self.current_context = "function"
+                self.visit(decl)
+            elif isinstance(decl, ActorDecl):
+                self.uses_actors = True
                 self.visit(decl)
             elif isinstance(decl, TypeSignature):
                 pass  # Las firmas se manejan junto con las funciones
@@ -516,24 +637,33 @@ class CppCodeGenerator(ASTVisitor):
         """Visita un bloque do"""
         statements = []
         last_value = "0"
+        last_is_void = False
         
         for stmt in node.statements:
             if isinstance(stmt, DoExprStmt):
                 code = self.visit(stmt.expr)
                 statements.append(f"{code};")
                 last_value = code
+                # Detectar si es println/print (void)
+                last_is_void = "println" in code or "print(" in code or "->send(" in code
             elif isinstance(stmt, DoBindStmt):
                 code = self.visit(stmt.expr)
                 statements.append(f"auto {stmt.name} = {code};")
+                last_is_void = False
             elif isinstance(stmt, DoLetStmt):
                 code = self.visit(stmt.expr)
                 statements.append(f"auto {stmt.name} = {code};")
+                last_is_void = False
             elif isinstance(stmt, DoReturnStmt):
                 code = self.visit(stmt.expr)
                 last_value = code
+                last_is_void = False
         
         stmts_str = " ".join(statements)
-        return f"[&]() {{ {stmts_str} return {last_value}; }}()"
+        if last_is_void:
+            return f"[&]() {{ {stmts_str} return 0; }}()"
+        else:
+            return f"[&]() {{ {stmts_str} return {last_value}; }}()"
     
     def visit_BinaryExpr(self, node: BinaryExpr) -> str:
         """Visita una expresión binaria"""
@@ -738,6 +868,57 @@ class CppCodeGenerator(ASTVisitor):
         result = f"map_list([&](auto {var}) {{ return {expr}; }}, {result})"
         
         return result
+    
+    # ========================================================================
+    # VISITORS PARA ACTORES
+    # ========================================================================
+    
+    def visit_ActorDecl(self, node: ActorDecl) -> str:
+        """Genera código para una declaración de actor"""
+        self.actors_declared.add(node.name)
+        
+        params = [self._pattern_to_name(p) for p in node.params]
+        params_str = ", ".join([f"any {p}" for p in params])
+        
+        # Generar clase actor
+        lines = [
+            f"// Actor: {node.name}",
+            f"class {node.name}Actor : public Actor {{",
+            "public:",
+            f"    {node.name}Actor() {{",
+            "        set_handler([this](any _msg) { this->handle(_msg); });",
+            "    }",
+            "",
+            "    void handle(any _msg) {",
+        ]
+        
+        # Generar cuerpo del handler
+        if node.body:
+            body_code = self.visit(node.body)
+            if params:
+                lines.append(f"        auto {params[0]} = _msg;")
+            lines.append(f"        {body_code};")
+        
+        lines.extend([
+            "    }",
+            "};",
+            "",
+        ])
+        
+        self.function_defs.extend(lines)
+        return ""
+    
+    def visit_SpawnExpr(self, node: SpawnExpr) -> str:
+        """Genera código para spawn de actor"""
+        self.uses_actors = True
+        actor_name = node.actor_name
+        return f"actorSystem.spawn<{actor_name}Actor>()"
+    
+    def visit_SendExpr(self, node: SendExpr) -> str:
+        """Genera código para envío de mensaje"""
+        target = self.visit(node.target)
+        message = self.visit(node.message)
+        return f"{target}->send({message})"
     
     def generic_visit(self, node: ASTNode) -> str:
         """Visita genérica"""
