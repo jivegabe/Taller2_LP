@@ -1,6 +1,7 @@
 (* ============================================================================
    FunLang - Gramática E-BNF
    Lenguaje Funcional con soporte imperativo para SPL
+   Incluye: Modelo de Actores para computación distribuida
    Compatible con https://www.bottlecaps.de/rr/ui
    ============================================================================ *)
 
@@ -21,6 +22,7 @@ Declaration   ::= FunctionDecl
                 | VarDecl
                 | ConstDecl
                 | DataDecl
+                | ActorDecl
 
 (* ===== DECLARACIÓN DE FUNCIONES (estilo Haskell) ===== *)
 FunctionDecl  ::= FunctionSig? FunctionDef
@@ -87,7 +89,19 @@ Expression    ::= LetExpr
                 | WhileExpr
                 | ForExpr
                 | DoBlock
+                | SpawnExpr
+                | SendExpr
                 | LogicalOrExpr
+
+(* ===== MODELO DE ACTORES ===== *)
+(* Declaración de un actor con su handler de mensajes *)
+ActorDecl     ::= 'actor' IDENTIFIER ParamList '=' Expression
+
+(* Crear una instancia de un actor *)
+SpawnExpr     ::= 'spawn' IDENTIFIER
+
+(* Enviar un mensaje a un actor *)
+SendExpr      ::= 'send' PostfixExpr PostfixExpr
 
 (* ===== LET EXPRESSION ===== *)
 LetExpr       ::= 'let' LetBindings 'in' Expression
@@ -230,3 +244,11 @@ COMMENT       ::= '--' [^\n]*
 
 (* ===== ESPACIOS EN BLANCO ===== *)
 WHITESPACE    ::= [ \t\n\r]+
+
+(* ===== PALABRAS RESERVADAS ===== *)
+(* Control de flujo: if, then, else, case, of, while, for, in, do, end, return *)
+(* Declaraciones: let, var, const, type, data, module, import, where, as *)
+(* Funciones: fn *)
+(* Booleanos: True, False *)
+(* Operadores: and, or, not, mod, div *)
+(* Modelo de Actores: actor, spawn, send *)
